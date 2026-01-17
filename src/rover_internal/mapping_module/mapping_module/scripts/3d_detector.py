@@ -251,8 +251,8 @@ class ZED3DDetector(Node):
         
         if self.predictor is not None:
             try:
-                # Run inference
-                # ==============
+                # Run inference :
+                # =====================
                 # CORE interfacing code
                 predictions = self.predictor.compute_prediction(self.latest_image)
                 top_predictions = self.predictor.select_top_predictions(predictions)
