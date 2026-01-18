@@ -14,6 +14,39 @@ rover_ROS_ws/
 
 ## Setup
 
+### Using Conda (Recommended for Python packages)
+
+If you're using conda environments (e.g., for ZED SDK, PyTorch, etc.):
+
+1. **Activate conda and source ROS2:**
+   ```bash
+   source setup_conda_ros.sh
+   ```
+   Or manually:
+   ```bash
+   # Activate conda environment
+   conda activate zed_pytorch  # or your conda env name
+   
+   # Source ROS2
+   source /opt/ros/<ros2-distro>/setup.bash
+   
+   # Source workspace
+   source install/setup.bash
+   ```
+
+2. **Fix Python paths in entry point scripts (if needed):**
+   ```bash
+   ./fix_python_paths.sh
+   ```
+
+3. **Build the workspace (with conda activated):**
+   ```bash
+   cd /home/khw/Dev/rover_ROS_ws
+   colcon build
+   ```
+
+### Standard Setup (without Conda)
+
 1. Source your ROS2 installation:
    ```bash
    source /opt/ros/<ros2-distro>/setup.bash

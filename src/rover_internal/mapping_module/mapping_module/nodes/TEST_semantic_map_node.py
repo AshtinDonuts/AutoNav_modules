@@ -1,0 +1,754 @@
+"""
+ZED VSLAM Node with Semantic Mapping
+
+This node implements a Visual SLAM system using the ZED 2 SDK with:
+- Positional tracking with area memory for loop closure
+- Live occupancy grid mapping from depth data
+- Semantic segmentation using 3D Mask R-CNN
+- Semantic pointcloud publishing with class labels
+- Pose and odometry publishing
+- Support for SVO file playback
+"""
+
+import numpy as np
+import cv2
+import math
+from collections import deque
+import struct
+
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+from sensor_msgs.msg import Image, PointCloud2, CameraInfo, PointField
+from nav_msgs.msg import OccupancyGrid, Odometry, MapMetaData
+from geometry_msgs.msg import Pose, PoseStamped, Twist, TransformStamped
+from std_msgs.msg import Header, String
+from cv_bridge import CvBridge
+import tf2_ros
+from tf2_ros import TransformBroadcaster
+
+# Try to import ZED SDK
+try:
+    import pyzed.sl as sl
+    ZED_SDK_AVAILABLE = True
+except ImportError:
+    ZED_SDK_AVAILABLE = False
+    print("Warning: ZED SDK not available. Please install pyzed.")
+
+# Try to import maskrcnn-benchmark
+MASK_RCNN_AVAILABLE = False
+try:
+    import torch
+    from maskrcnn_benchmark.config import cfg
+    from maskrcnn_benchmark.engine.predictor import COCODemo
+    MASK_RCNN_AVAILABLE = True
+except ImportError:
+    print("Warning: Mask R-CNN not available. Semantic mapping will be disabled.")
+
+
+class ZEDVSLAMNode(Node):
+    """
+    ROS2 Node for VSLAM with semantic mapping using ZED camera and 3D Mask R-CNN
+    """
+    
+    def __init__(self, svo_filename=None, area_file_path=None, 
+                 grid_resolution=0.05, grid_width=100, grid_height=100,
+                 min_height=-0.5, max_height=2.0, publish_rate=10.0,
+                 maskrcnn_config=None, min_image_size=256, device='cuda'):
+        super().__init__('zed_vslam_node')
+        
+        if not ZED_SDK_AVAILABLE:
+            self.get_logger().error("ZED SDK not available. Cannot initialize VSLAM.")
+            raise RuntimeError("ZED SDK required but not available")
+        
+        self.bridge = CvBridge()
+        self.svo_filename = svo_filename
+        self.area_file_path = area_file_path
+        self.grid_resolution = grid_resolution
+        self.grid_width = grid_width
+        self.grid_height = grid_height
+        self.min_height = min_height
+        self.max_height = max_height
+        
+        # Mask R-CNN parameters
+        self.maskrcnn_config = maskrcnn_config
+        self.min_image_size = min_image_size
+        self.device = device if (MASK_RCNN_AVAILABLE and torch.cuda.is_available()) else 'cpu'
+        self.predictor = None
+        self.semantic_enabled = False
+        
+        # Segmentation mask storage
+        self.current_segmentation_mask = None  # 2D array with class labels per pixel
+        self.current_image_shape = None
+        
+        # Occupancy grid parameters
+        self.grid_origin_x = -grid_width * grid_resolution / 2.0
+        self.grid_origin_y = -grid_height * grid_resolution / 2.0
+        
+        # Initialize occupancy grid
+        self.occupancy_grid = np.full((grid_height, grid_width), -1, dtype=np.int8)
+        self.occupancy_counts = np.zeros((grid_height, grid_width), dtype=np.float32)
+        
+        # Initialize Mask R-CNN if config provided
+        if self.maskrcnn_config and MASK_RCNN_AVAILABLE:
+            self.init_maskrcnn()
+        
+        # Initialize ZED camera
+        self.zed = None
+        self.init_zed_camera()
+        
+        # Initialize positional tracking
+        self.tracking_enabled = False
+        self.enable_positional_tracking()
+        
+        # Camera pose and tracking state
+        self.camera_pose = sl.Pose()
+        self.tracking_state = sl.POSITIONAL_TRACKING_STATE.OFF
+        self.initial_pose_set = False
+        
+        # TF broadcaster
+        self.tf_broadcaster = TransformBroadcaster(self)
+        
+        # ROS2 Publishers
+        qos_profile = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            depth=10
+        )
+        
+        self.occupancy_grid_pub = self.create_publisher(
+            OccupancyGrid,
+            '/zed_vslam/occupancy_grid',
+            qos_profile
+        )
+        
+        self.pose_pub = self.create_publisher(
+            PoseStamped,
+            '/zed_vslam/pose',
+            10
+        )
+        
+        self.odom_pub = self.create_publisher(
+            Odometry,
+            '/zed_vslam/odometry',
+            10
+        )
+        
+        self.point_cloud_pub = self.create_publisher(
+            PointCloud2,
+            '/zed_vslam/point_cloud',
+            10
+        )
+        
+        # Semantic pointcloud publisher (with class labels)
+        self.semantic_point_cloud_pub = self.create_publisher(
+            PointCloud2,
+            '/zed_vslam/semantic_point_cloud',
+            10
+        )
+        
+        self.camera_info_pub = self.create_publisher(
+            CameraInfo,
+            '/zed_vslam/camera_info',
+            10
+        )
+        
+        # Timer for processing frames
+        self.timer_period = 1.0 / publish_rate
+        self.timer = self.create_timer(self.timer_period, self.process_frame)
+        
+        # Frame counter for statistics
+        self.frame_count = 0
+        self.last_time = self.get_clock().now()
+        
+        self.get_logger().info('ZED VSLAM node initialized')
+        self.get_logger().info(f'Grid resolution: {grid_resolution}m')
+        self.get_logger().info(f'Grid size: {grid_width}x{grid_height} cells')
+        self.get_logger().info(f'Height filter: {min_height}m to {max_height}m')
+        if self.semantic_enabled:
+            self.get_logger().info('Semantic segmentation enabled with Mask R-CNN')
+        else:
+            self.get_logger().info('Semantic segmentation disabled')
+    
+    def init_maskrcnn(self):
+        """Initialize Mask R-CNN model for semantic segmentation"""
+        try:
+            # Load config
+            cfg.merge_from_file(self.maskrcnn_config)
+            cfg.merge_from_list(["MODEL.DEVICE", self.device])
+            cfg.merge_from_list(["MODEL.WEIGHT", ""])  # Will download automatically
+            
+            # Create predictor
+            self.predictor = COCODemo(
+                cfg,
+                min_image_size=self.min_image_size,
+                confidence_threshold=0.5,
+                show_mask_heatmaps=False
+            )
+            
+            self.semantic_enabled = True
+            self.get_logger().info(f"Mask R-CNN model loaded from {self.maskrcnn_config}")
+            self.get_logger().info(f"Using device: {self.device}")
+        except Exception as e:
+            self.get_logger().error(f"Error loading Mask R-CNN model: {e}")
+            self.predictor = None
+            self.semantic_enabled = False
+    
+    def init_zed_camera(self):
+        """Initialize ZED camera using ZED SDK"""
+        try:
+            self.zed = sl.Camera()
+            init_params = sl.InitParameters()
+            
+            # Set resolution and depth mode
+            init_params.camera_resolution = sl.RESOLUTION.HD720
+            init_params.camera_fps = 30
+            init_params.depth_mode = sl.DEPTH_MODE.NEURAL  # Use neural depth for better quality
+            init_params.coordinate_units = sl.UNIT.METER
+            init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Y_UP
+            init_params.sdk_verbose = False
+            
+            # Handle SVO file input
+            if self.svo_filename:
+                init_params.set_from_svo_file(self.svo_filename)
+                init_params.svo_real_time_mode = True
+                self.get_logger().info(f"Using SVO file: {self.svo_filename}")
+            
+            # Open camera
+            status = self.zed.open(init_params)
+            if status != sl.ERROR_CODE.SUCCESS:
+                self.get_logger().error(f"Failed to open ZED camera: {status}")
+                raise RuntimeError(f"ZED camera initialization failed: {status}")
+            
+            # Get camera information
+            cam_info = self.zed.get_camera_information()
+            self.get_logger().info(f"ZED Camera opened successfully")
+            self.get_logger().info(f"Resolution: {cam_info.camera_configuration.resolution.width}x{cam_info.camera_configuration.resolution.height}")
+            self.get_logger().info(f"FPS: {cam_info.camera_configuration.fps}")
+            
+        except Exception as e:
+            self.get_logger().error(f"Error initializing ZED camera: {e}")
+            raise
+    
+    def enable_positional_tracking(self):
+        """Enable positional tracking with area memory"""
+        try:
+            tracking_params = sl.PositionalTrackingParameters()
+            
+            # Enable area memory for loop closure and relocalization
+            tracking_params.enable_area_memory = True
+            tracking_params.enable_pose_smoothing = True
+            tracking_params.enable_imu_fusion = True
+            tracking_params.set_floor_as_origin = False
+            tracking_params.set_gravity_as_origin = True
+            
+            # Load area file if provided
+            if self.area_file_path:
+                tracking_params.area_file_path = self.area_file_path
+                self.get_logger().info(f"Loading area memory from: {self.area_file_path}")
+            
+            # Enable tracking
+            status = self.zed.enable_positional_tracking(tracking_params)
+            if status != sl.ERROR_CODE.SUCCESS:
+                self.get_logger().error(f"Failed to enable positional tracking: {status}")
+                return
+            
+            self.tracking_enabled = True
+            self.get_logger().info("Positional tracking enabled with area memory")
+            
+        except Exception as e:
+            self.get_logger().error(f"Error enabling positional tracking: {e}")
+    
+    def process_frame(self):
+        """Process a frame from ZED camera"""
+        if self.zed is None:
+            return
+        
+        # Grab frame
+        if self.zed.grab() != sl.ERROR_CODE.SUCCESS:
+            return
+        
+        # Get camera pose
+        self.tracking_state = self.zed.get_position(
+            self.camera_pose, 
+            sl.REFERENCE_FRAME.WORLD
+        )
+        
+        # Retrieve images and depth
+        image = sl.Mat()
+        depth = sl.Mat()
+        point_cloud = sl.Mat()
+        
+        self.zed.retrieve_image(image, sl.VIEW.LEFT)
+        self.zed.retrieve_measure(depth, sl.MEASURE.DEPTH)
+        self.zed.retrieve_measure(point_cloud, sl.MEASURE.XYZRGBA)
+        
+        # Get image as numpy array for segmentation
+        image_data = image.get_data()
+        self.current_image_shape = (image_data.shape[0], image_data.shape[1])
+        
+        # Run semantic segmentation if enabled
+        if self.semantic_enabled and self.predictor is not None:
+            self.process_semantic_segmentation(image_data)
+        
+        # Publish camera info (only once or periodically)
+        if self.frame_count % 30 == 0:
+            self.publish_camera_info()
+        
+        # Update occupancy grid from point cloud
+        if self.tracking_state == sl.POSITIONAL_TRACKING_STATE.OK:
+            self.update_occupancy_grid(point_cloud, self.camera_pose)
+            self.publish_pose()
+            self.publish_odometry()
+            self.publish_tf()
+        
+        # Publish semantic point cloud (with class labels)
+        if self.semantic_enabled:
+            self.publish_semantic_point_cloud(point_cloud)
+        else:
+            # Publish regular point cloud if semantic is disabled
+            # self.publish_point_cloud(point_cloud)
+            pass
+        
+        # Publish occupancy grid
+        self.publish_occupancy_grid()
+        
+        self.frame_count += 1
+        
+        # Log statistics periodically
+        if self.frame_count % 100 == 0:
+            current_time = self.get_clock().now()
+            elapsed = (current_time - self.last_time).nanoseconds / 1e9
+            fps = 100.0 / elapsed if elapsed > 0 else 0
+            self.get_logger().info(
+                f"Tracking state: {self.tracking_state}, "
+                f"FPS: {fps:.1f}, "
+                f"Frame: {self.frame_count}"
+            )
+            self.last_time = current_time
+    
+    def update_occupancy_grid(self, point_cloud, camera_pose):
+        """
+        Update occupancy grid from point cloud data
+        
+        Args:
+            point_cloud: ZED point cloud (sl.Mat)
+            camera_pose: Current camera pose (sl.Pose)
+        """
+        # Get point cloud data
+        pc_data = point_cloud.get_data()
+        height, width = pc_data.shape[:2]
+        
+        # Get camera position in world frame
+        camera_translation = camera_pose.get_translation()
+        camera_rotation = camera_pose.get_rotation()
+        
+        # Convert rotation quaternion to rotation matrix
+        qx, qy, qz, qw = camera_rotation.get()
+        # ZED uses right-handed Y-up coordinate system
+        # ROS uses right-handed Z-up, so we need to transform
+        
+        # Sample points (for performance, process every Nth point)
+        step = 2  # Process every 2nd point
+        
+        for y in range(0, height, step):
+            for x in range(0, width, step):
+                point = pc_data[y, x]
+                
+                # Check if point is valid (non-zero and finite)
+                if (np.isnan(point[0]) or np.isnan(point[1]) or np.isnan(point[2]) or
+                    np.isinf(point[0]) or np.isinf(point[1]) or np.isinf(point[2]) or
+                    point[2] == 0.0):
+                    continue
+                
+                # Point in camera frame (ZED coordinate system: X-right, Y-down, Z-forward)
+                px, py, pz = point[0], point[1], point[2]
+                
+                # Filter by height (in camera frame, Y is vertical)
+                if py < self.min_height or py > self.max_height:
+                    continue
+                
+                # Transform to world frame
+                # For 2D occupancy grid, we project onto XZ plane (ground plane)
+                # In ZED: X-right, Y-down, Z-forward
+                # For 2D map: X-forward, Y-left (ROS convention)
+                world_x = camera_translation.get()[0] + px
+                world_y = camera_translation.get()[2] + pz  # Use Z as forward
+                
+                # Convert world coordinates to grid indices
+                grid_x = int((world_x - self.grid_origin_x) / self.grid_resolution)
+                grid_y = int((world_y - self.grid_origin_y) / self.grid_resolution)
+                
+                # Check bounds
+                if 0 <= grid_x < self.grid_width and 0 <= grid_y < self.grid_height:
+                    # Mark as occupied
+                    self.occupancy_counts[grid_y, grid_x] += 1.0
+                    
+                    # Ray casting: mark free space from camera to point
+                    self.raycast_free_space(
+                        camera_translation.get()[0],
+                        camera_translation.get()[2],
+                        world_x, world_y,
+                        grid_x, grid_y
+                    )
+        
+        # Update occupancy grid from counts
+        # Use a threshold to determine occupancy
+        occupied_threshold = 3.0
+        self.occupancy_grid = np.where(
+            self.occupancy_counts > occupied_threshold,
+            100,  # Occupied
+            np.where(
+                self.occupancy_counts > 0,
+                0,  # Free
+                -1  # Unknown
+            )
+        )
+    
+    def raycast_free_space(self, cam_x, cam_y, point_x, point_y, end_grid_x, end_grid_y):
+        """
+        Raycast from camera to point, marking free space
+        
+        Args:
+            cam_x, cam_y: Camera position in world coordinates
+            point_x, point_y: Point position in world coordinates
+            end_grid_x, end_grid_y: End point grid indices
+        """
+        # Convert camera position to grid
+        start_grid_x = int((cam_x - self.grid_origin_x) / self.grid_resolution)
+        start_grid_y = int((cam_y - self.grid_origin_y) / self.grid_resolution)
+        
+        # Bresenham's line algorithm for raycasting
+        dx = abs(end_grid_x - start_grid_x)
+        dy = abs(end_grid_y - start_grid_y)
+        sx = 1 if start_grid_x < end_grid_x else -1
+        sy = 1 if start_grid_y < end_grid_y else -1
+        err = dx - dy
+        
+        x, y = start_grid_x, start_grid_y
+        
+        while True:
+            # Check bounds
+            if 0 <= x < self.grid_width and 0 <= y < self.grid_height:
+                # Only mark as free if not already occupied
+                if self.occupancy_counts[y, x] < 1.0:
+                    self.occupancy_counts[y, x] = max(0.0, self.occupancy_counts[y, x] - 0.1)
+            
+            if x == end_grid_x and y == end_grid_y:
+                break
+            
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
+    
+    def publish_occupancy_grid(self):
+        """Publish occupancy grid as ROS message"""
+        msg = OccupancyGrid()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'map'
+        
+        msg.info.resolution = self.grid_resolution
+        msg.info.width = self.grid_width
+        msg.info.height = self.grid_height
+        msg.info.origin.position.x = self.grid_origin_x
+        msg.info.origin.position.y = self.grid_origin_y
+        msg.info.origin.position.z = 0.0
+        msg.info.origin.orientation.w = 1.0
+        
+        # Flatten grid and convert to list
+        # Occupancy grid uses row-major order
+        grid_flat = self.occupancy_grid.flatten()
+        msg.data = grid_flat.tolist()
+        
+        self.occupancy_grid_pub.publish(msg)
+    
+    def publish_pose(self):
+        """Publish camera pose"""
+        if self.tracking_state != sl.POSITIONAL_TRACKING_STATE.OK:
+            return
+        
+        pose_msg = PoseStamped()
+        pose_msg.header.stamp = self.get_clock().now().to_msg()
+        pose_msg.header.frame_id = 'map'
+        
+        translation = self.camera_pose.get_translation()
+        rotation = self.camera_pose.get_rotation()
+        
+        pose_msg.pose.position.x = float(translation.get()[0])
+        pose_msg.pose.position.y = float(translation.get()[1])
+        pose_msg.pose.position.z = float(translation.get()[2])
+        
+        pose_msg.pose.orientation.x = float(rotation.get()[0])
+        pose_msg.pose.orientation.y = float(rotation.get()[1])
+        pose_msg.pose.orientation.z = float(rotation.get()[2])
+        pose_msg.pose.orientation.w = float(rotation.get()[3])
+        
+        self.pose_pub.publish(pose_msg)
+    
+    def publish_odometry(self):
+        """Publish odometry message"""
+        if self.tracking_state != sl.POSITIONAL_TRACKING_STATE.OK:
+            return
+        
+        odom_msg = Odometry()
+        odom_msg.header.stamp = self.get_clock().now().to_msg()
+        odom_msg.header.frame_id = 'map'
+        odom_msg.child_frame_id = 'zed_camera_center'
+        
+        translation = self.camera_pose.get_translation()
+        rotation = self.camera_pose.get_rotation()
+        
+        odom_msg.pose.pose.position.x = float(translation.get()[0])
+        odom_msg.pose.pose.position.y = float(translation.get()[1])
+        odom_msg.pose.pose.position.z = float(translation.get()[2])
+        
+        odom_msg.pose.pose.orientation.x = float(rotation.get()[0])
+        odom_msg.pose.pose.orientation.y = float(rotation.get()[1])
+        odom_msg.pose.pose.orientation.z = float(rotation.get()[2])
+        odom_msg.pose.pose.orientation.w = float(rotation.get()[3])
+        
+        # Set covariance (placeholder values)
+        odom_msg.pose.covariance[0] = 0.01  # x
+        odom_msg.pose.covariance[7] = 0.01  # y
+        odom_msg.pose.covariance[14] = 0.01  # z
+        odom_msg.pose.covariance[21] = 0.01  # roll
+        odom_msg.pose.covariance[28] = 0.01  # pitch
+        odom_msg.pose.covariance[35] = 0.01  # yaw
+        
+        self.odom_pub.publish(odom_msg)
+    
+    def publish_tf(self):
+        """Publish transform from map to camera"""
+        if self.tracking_state != sl.POSITIONAL_TRACKING_STATE.OK:
+            return
+        
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'map'
+        t.child_frame_id = 'zed_camera_center'
+        
+        translation = self.camera_pose.get_translation()
+        rotation = self.camera_pose.get_rotation()
+        
+        t.transform.translation.x = float(translation.get()[0])
+        t.transform.translation.y = float(translation.get()[1])
+        t.transform.translation.z = float(translation.get()[2])
+        
+        t.transform.rotation.x = float(rotation.get()[0])
+        t.transform.rotation.y = float(rotation.get()[1])
+        t.transform.rotation.z = float(rotation.get()[2])
+        t.transform.rotation.w = float(rotation.get()[3])
+        
+        self.tf_broadcaster.sendTransform(t)
+    
+    def publish_camera_info(self):
+        """Publish camera info"""
+        cam_info = self.zed.get_camera_information()
+        calib = cam_info.camera_configuration.calibration_parameters.left_cam
+        
+        info_msg = CameraInfo()
+        info_msg.header.stamp = self.get_clock().now().to_msg()
+        info_msg.header.frame_id = 'zed_camera_center'
+        
+        info_msg.width = calib.image_size.width
+        info_msg.height = calib.image_size.height
+        
+        # Intrinsic matrix
+        info_msg.k[0] = calib.fx
+        info_msg.k[2] = calib.cx
+        info_msg.k[4] = calib.fy
+        info_msg.k[5] = calib.cy
+        info_msg.k[8] = 1.0
+        
+        # Distortion model
+        info_msg.distortion_model = 'plumb_bob'
+        info_msg.d[0] = calib.disto[0]
+        info_msg.d[1] = calib.disto[1]
+        info_msg.d[2] = calib.disto[2]
+        info_msg.d[3] = calib.disto[3]
+        info_msg.d[4] = calib.disto[4]
+        
+        self.camera_info_pub.publish(info_msg)
+    
+    def process_semantic_segmentation(self, image):
+        """
+        Process semantic segmentation using Mask R-CNN
+        
+        Args:
+            image: RGB image as numpy array (BGR format from ZED)
+        """
+        try:
+            # Run inference
+            predictions = self.predictor.compute_prediction(image)
+            top_predictions = self.predictor.select_top_predictions(predictions)
+            
+            # Extract detections
+            boxes = top_predictions.bbox.cpu().numpy()
+            labels = top_predictions.get_field("labels").cpu().numpy()
+            
+            # Get masks if available
+            masks = None
+            if top_predictions.has_field("mask"):
+                masks = top_predictions.get_field("mask")
+            
+            # Create segmentation mask (2D array with class labels per pixel)
+            height, width = image.shape[:2]
+            self.current_segmentation_mask = np.zeros((height, width), dtype=np.int32)
+            
+            # Fill mask with class labels from detections
+            if masks is not None:
+                # Handle SegmentationMask object from maskrcnn-benchmark
+                try:
+                    from maskrcnn_benchmark.structures.segmentation_mask import SegmentationMask
+                    if isinstance(masks, SegmentationMask):
+                        # Convert to mask format
+                        masks = masks.convert('mask')
+                except (ImportError, AttributeError):
+                    pass
+                
+                for i in range(len(boxes)):
+                    label = int(labels[i])
+                    mask = masks[i]
+                    
+                    # Convert mask to numpy array
+                    if hasattr(mask, 'cpu'):
+                        # PyTorch tensor
+                        mask_np = mask.cpu().numpy()
+                    elif hasattr(mask, 'numpy'):
+                        # TensorFlow tensor
+                        mask_np = mask.numpy()
+                    elif hasattr(mask, 'get_mask_tensor'):
+                        # SegmentationMask object
+                        mask_np = mask.get_mask_tensor().cpu().numpy()
+                    else:
+                        # Try to convert directly
+                        mask_np = np.array(mask)
+                    
+                    # Ensure mask is 2D boolean array
+                    if len(mask_np.shape) > 2:
+                        mask_np = mask_np.squeeze()
+                    
+                    # Convert to boolean if needed
+                    if mask_np.dtype != bool:
+                        mask_np = mask_np > 0.5
+                    
+                    # Resize mask to image size if needed
+                    if mask_np.shape[0] != height or mask_np.shape[1] != width:
+                        mask_np = cv2.resize(mask_np.astype(np.uint8), (width, height), 
+                                            interpolation=cv2.INTER_NEAREST).astype(bool)
+                    
+                    # Set class label where mask is True (overwrite if multiple detections overlap)
+                    # Use maximum label for overlapping regions
+                    mask_indices = mask_np > 0
+                    self.current_segmentation_mask[mask_indices] = np.maximum(
+                        self.current_segmentation_mask[mask_indices], label
+                    )
+            
+        except Exception as e:
+            self.get_logger().error(f"Error in semantic segmentation: {e}", exc_info=True)
+            self.current_segmentation_mask = None
+    
+    def publish_semantic_point_cloud(self, point_cloud):
+        """
+        Publish semantic point cloud with xyz coordinates and class labels
+        
+        Args:
+            point_cloud: ZED point cloud (sl.Mat)
+        """
+        if self.current_segmentation_mask is None:
+            return
+        
+        try:
+            # Get point cloud data
+            pc_data = point_cloud.get_data()
+            height, width = pc_data.shape[:2]
+            
+            # Prepare point cloud data
+            points = []
+            
+            # Sample points (for performance)
+            step = 2  # Process every 2nd point
+            
+            for y in range(0, height, step):
+                for x in range(0, width, step):
+                    point = pc_data[y, x]
+                    
+                    # Check if point is valid
+                    if (np.isnan(point[0]) or np.isnan(point[1]) or np.isnan(point[2]) or
+                        np.isinf(point[0]) or np.isinf(point[1]) or np.isinf(point[2]) or
+                        point[2] == 0.0):
+                        continue
+                    
+                    # Get class label from segmentation mask
+                    class_label = 0  # Default to background/unknown
+                    if (y < self.current_segmentation_mask.shape[0] and 
+                        x < self.current_segmentation_mask.shape[1]):
+                        class_label = int(self.current_segmentation_mask[y, x])
+                    
+                    # Point coordinates (x, y, z) and class label
+                    points.append([point[0], point[1], point[2], class_label])
+            
+            if len(points) == 0:
+                return
+            
+            # Create PointCloud2 message
+            msg = PointCloud2()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = 'zed_camera_center'
+            
+            msg.height = 1
+            msg.width = len(points)
+            
+            # Define fields: x, y, z, label
+            msg.fields = [
+                PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+                PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+                PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+                PointField(name='label', offset=12, datatype=PointField.INT32, count=1)
+            ]
+            
+            msg.is_bigendian = False
+            msg.point_step = 16  # 4 bytes per float32 * 3 + 4 bytes for int32
+            msg.row_step = msg.point_step * msg.width
+            msg.is_dense = False
+            
+            # Pack data manually to handle mixed types (float32 for xyz, int32 for label)
+            import struct
+            msg.data = bytearray()
+            for point in points:
+                # Pack x, y, z as float32, label as int32
+                msg.data.extend(struct.pack('fff i', point[0], point[1], point[2], point[3]))
+            
+            self.semantic_point_cloud_pub.publish(msg)
+            
+        except Exception as e:
+            self.get_logger().error(f"Error publishing semantic point cloud: {e}")
+    
+    def publish_point_cloud(self, point_cloud):
+        """Publish point cloud (optional, for visualization)"""
+        # This is a simplified version - full implementation would convert
+        # ZED point cloud to ROS PointCloud2 message
+        # For now, we'll skip this to save performance
+        pass
+    
+    def destroy_node(self):
+        """Cleanup on shutdown"""
+        if self.zed is not None:
+            # Save area memory if enabled
+            if self.tracking_enabled and self.area_file_path:
+                try:
+                    self.zed.save_area_map(self.area_file_path)
+                    self.get_logger().info(f"Area memory saved to: {self.area_file_path}")
+                except Exception as e:
+                    self.get_logger().warn(f"Could not save area memory: {e}")
+            
+            if self.tracking_enabled:
+                self.zed.disable_positional_tracking()
+            
+            self.zed.close()
+        
+        super().destroy_node()

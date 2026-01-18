@@ -3,16 +3,61 @@ Launch file for ZED VSLAM with occupancy tracking
 """
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, LogInfo
+from launch.actions import DeclareLaunchArgument, LogInfo, SetEnvironmentVariable
 from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 import os
+import shutil
 
 
 def generate_launch_description():
     """Generate launch description"""
+    
+    # Find conda Python interpreter
+    conda_python = None
+    conda_bin = None
+    
+    # Check for active conda environment
+    conda_prefix = os.environ.get('CONDA_PREFIX')
+    if conda_prefix:
+        conda_python = os.path.join(conda_prefix, 'bin', 'python3')
+        conda_bin = os.path.join(conda_prefix, 'bin')
+        if not os.path.exists(conda_python):
+            conda_python = None
+            conda_bin = None
+    
+    # Fallback: try to find conda python in common locations
+    if not conda_python:
+        # Check common conda environment names
+        conda_base = os.path.expanduser('~/miniconda3')
+        if not os.path.exists(conda_base):
+            conda_base = os.path.expanduser('~/anaconda3')
+        
+        if os.path.exists(conda_base):
+            # Try zed_pytorch first (likely for ZED work)
+            for env_name in ['zed_pytorch', 'base']:
+                conda_env_path = os.path.join(conda_base, 'envs', env_name, 'bin', 'python3')
+                if os.path.exists(conda_env_path):
+                    conda_python = conda_env_path
+                    conda_bin = os.path.dirname(conda_python)
+                    break
+    
+    # Set environment variables to prioritize conda Python
+    env_actions = []
+    if conda_python and os.path.exists(conda_python) and conda_bin:
+        # Prepend conda bin to PATH so conda Python is found first
+        current_path = os.environ.get('PATH', '')
+        # Only prepend if not already there
+        if conda_bin not in current_path.split(':'):
+            new_path = f"{conda_bin}:{current_path}"
+            env_actions.append(SetEnvironmentVariable('PATH', new_path))
+        
+        # Set PYTHONPATH to include conda site-packages if needed
+        conda_site_packages = os.path.join(os.path.dirname(conda_bin), '..', 'lib', 'python3.*', 'site-packages')
+        # Note: PYTHONPATH is usually handled by conda, but we ensure it's set
+        env_actions.append(SetEnvironmentVariable('PYTHON_EXECUTABLE', conda_python))
     
     # Declare launch arguments
     svo_file_arg = DeclareLaunchArgument(
@@ -90,6 +135,7 @@ def generate_launch_description():
     )
     
     return LaunchDescription([
+        *env_actions,  # Add environment setup actions first
         svo_file_arg,
         area_file_arg,
         grid_resolution_arg,
@@ -99,5 +145,5 @@ def generate_launch_description():
         max_height_arg,
         publish_rate_arg,
         zed_vslam_node,
-        LogInfo(msg='ZED VSLAM node launched with occupancy tracking')
+        LogInfo(msg=f'ZED VSLAM node launched with occupancy tracking (Python: {conda_python or "system"})')
     ])
