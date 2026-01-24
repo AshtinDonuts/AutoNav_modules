@@ -655,6 +655,8 @@ class ZEDVSLAMNode(Node):
     def publish_semantic_point_cloud(self, point_cloud):
         """
         Publish semantic point cloud with xyz coordinates and class labels
+
+        THIS IS THE MAIN CONTRIBUTION OF THE SEMANTIC MODULE
         
         Args:
             point_cloud: ZED point cloud (sl.Mat)

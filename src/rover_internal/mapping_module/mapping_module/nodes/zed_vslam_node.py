@@ -211,7 +211,7 @@ class ZEDVSLAMNode(Node):
         )
         
         # Retrieve images and depth
-        image = sl.Mat()
+        image = sl.Mat()   # Calls C constructor (an empty z matrix container)
         depth = sl.Mat()
         point_cloud = sl.Mat()
         
@@ -230,8 +230,13 @@ class ZEDVSLAMNode(Node):
             self.publish_odometry()
             self.publish_tf()
         
+        ## HERE WE IMPLEMENT AND/OR PUBLISHING PC / PC-DELTAS / OCCUPANCY GRID
+        ## ------------------
+
         # Publish point cloud (optional, can be disabled for performance)
         # self.publish_point_cloud(point_cloud)
+
+        # self.publish_point_cloud_deltas(point_cloud)
         
         # Publish occupancy grid
         self.publish_occupancy_grid()
@@ -499,9 +504,8 @@ class ZEDVSLAMNode(Node):
     
     def publish_point_cloud(self, point_cloud):
         """Publish point cloud (optional, for visualization)"""
-        # This is a simplified version - full implementation would convert
-        # ZED point cloud to ROS PointCloud2 message
-        # For now, we'll skip this to save performance
+        # An implementation is found in zed_3dpc_node.py
+        # Not yet implemented in this class.
         pass
     
     def destroy_node(self):

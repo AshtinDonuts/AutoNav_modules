@@ -22,7 +22,7 @@ fi
 echo "Using conda Python: $CONDA_PYTHON"
 
 # Find all entry point scripts and update their shebang
-find "$INSTALL_DIR" -type f -name "zed_vslam" -o -name "zed_3d_detector" | while read script; do
+find "$INSTALL_DIR" -type f \( -name "zed_vslam" -o -name "zed_3d_detector" -o -name "zed_3dpc" -o -name "zed_2d_detector" \) | while read script; do
     if [ -f "$script" ]; then
         echo "Fixing: $script"
         # Replace hardcoded python3 path with env python3 (which will use PATH)
