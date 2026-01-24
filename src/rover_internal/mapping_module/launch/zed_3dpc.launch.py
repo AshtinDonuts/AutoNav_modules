@@ -1,5 +1,7 @@
 """
 Launch file for ZED 3D Point Cloud publisher
+
+Mainly for testing purpose. Will be integrated into zed_vslam module
 """
 
 from launch import LaunchDescription

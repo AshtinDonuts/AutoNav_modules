@@ -56,15 +56,32 @@ class ZedPointCloudNode(Node):
         self.timer = self.create_timer(timer_period, self.publish_cloud)
 
     def publish_cloud(self):
-        self.zed.retrieve_measure(self.pc, sl.MEASURE.XYZRGBA, sl.MEM.CPU)
+        # Grab a new frame first
+        if self.zed.grab() != sl.ERROR_CODE.SUCCESS:
+            self.get_logger().warn('Failed to grab frame from ZED camera')
+            return
+        
+        # Retrieve the point cloud measurement
+        status = self.zed.retrieve_measure(self.pc, sl.MEASURE.XYZRGBA, sl.MEM.CPU)
+        if status != sl.ERROR_CODE.SUCCESS:
+            self.get_logger().warn(f'Failed to retrieve point cloud: {status}')
+            return
 
         arr = self.pc.get_data()  # H x W x 4 float32
+        if arr is None or arr.size == 0:
+            self.get_logger().warn('Point cloud data is empty')
+            return
+        
         xyz = arr[..., :3].reshape(-1, 3)
         rgba = arr[..., 3].reshape(-1).view(np.uint32)
 
         valid = np.isfinite(xyz).all(axis=1)
         xyz = xyz[valid]
         rgba = rgba[valid]
+        
+        if xyz.shape[0] == 0:
+            self.get_logger().warn('No valid points in point cloud after filtering')
+            return
 
         points = np.empty(
             xyz.shape[0],
