@@ -14,6 +14,9 @@ source install/setup.bash
 # Launch both nodes together
 ros2 launch mapping_module zed_vslam_rtabmap.launch.py
 
+### AFTER USE
+rtabmap-databaseViewer /home/khw/.ros/rtabmap.db
+
 """
 
 from launch import LaunchDescription
@@ -58,33 +61,34 @@ def generate_launch_description():
     )
     
     # RTABMap parameters
+    # Using zed_vslam namespace for ZED SDK direct integration
     rgb_topic_arg = DeclareLaunchArgument(
         'rgb_topic',
-        default_value='/rgb/image_raw',
+        default_value='/zed_vslam/rgb/image_raw',
         description='RGB image topic for rtabmap'
     )
     
     depth_topic_arg = DeclareLaunchArgument(
         'depth_topic',
-        default_value='/depth/image_raw',
+        default_value='/zed_vslam/depth/image_raw',
         description='Depth image topic for rtabmap'
     )
     
     rgb_camera_info_topic_arg = DeclareLaunchArgument(
         'rgb_camera_info_topic',
-        default_value='/rgb/camera_info',
+        default_value='/zed_vslam/rgb/camera_info',
         description='RGB camera info topic for rtabmap'
     )
     
     depth_camera_info_topic_arg = DeclareLaunchArgument(
         'depth_camera_info_topic',
-        default_value='/depth/camera_info',
+        default_value='/zed_vslam/depth/camera_info',
         description='Depth camera info topic for rtabmap'
     )
     
     odom_topic_arg = DeclareLaunchArgument(
         'odom_topic',
-        default_value='/odom',
+        default_value='/zed_vslam/odom',
         description='Odometry topic for rtabmap'
     )
     
@@ -126,6 +130,8 @@ def generate_launch_description():
             'map_frame_id': 'map',
             'queue_size': 20,  # Increased for better synchronization
             'sync_queue_size': 20,  # Increased for better synchronization
+            # Enable depth camera info subscription
+            'subscribe_depth_camera_info': True,
             # Topic names (rtabmap expects these as parameters)
             'rgb_topic': LaunchConfiguration('rgb_topic'),
             'depth_topic': LaunchConfiguration('depth_topic'),
