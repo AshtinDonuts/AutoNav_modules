@@ -495,7 +495,7 @@ class ZEDVSLAMNode(Node):
             self.camera_info_left = cam_info.camera_configuration.calibration_parameters.left_cam
             # Get stereo baseline for projection matrix
             self.stereo_transform = cam_info.camera_configuration.calibration_parameters.stereo_transform.get_translation().get()
-            self.baseline = abs(self.stereo_transform.get()[0])  # Baseline in meters (Tx)
+            self.baseline = abs(self.stereo_transform[1])  # Baseline in meters (Ty, y-component is negative)
             
             # Log camera model parameters for verification
             self.get_logger().info('Camera model parameters:')

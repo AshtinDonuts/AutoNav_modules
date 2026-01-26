@@ -1,8 +1,7 @@
 build/
 install/
 log/
-*.pyc
-__pycache__/
-*.swp
-*.swo
-*~
+rosbags
+src/rosbags/
+
+*__pycache__/

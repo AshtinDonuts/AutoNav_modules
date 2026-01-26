@@ -15,7 +15,7 @@ from launch_ros.actions import Node
 from launch.actions import IncludeLaunchDescription, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.conditions import UnlessCondition
+from launch.conditions import UnlessCondition, IfCondition
 
 import tempfile
 
@@ -86,11 +86,11 @@ def launch_setup(context: LaunchContext, *args, **kwargs):
             parameters=parameters,
             remappings=remappings),
         
-        # RViz2 - optional, for viewing specific topics
-        # To use: add a .rviz config file or remove this node if not needed
+        # Copied over from example files
         # Node(
-        #     package='rviz2', executable='rviz2', output='screen',
-        # ),
+        #     package='rviz2', executable='rviz2', name="rviz2", output='screen',
+        #     condition=IfCondition(LaunchConfiguration("rviz")),
+        #     arguments=[["-d"], [LaunchConfiguration("rviz_cfg")]]),
     ]
 
 

@@ -13,7 +13,8 @@ setup(
         ('share/' + package_name + '/launch', [
             'launch/zed_vslam.launch.py', 
             'launch/zed_3dpc.launch.py',
-            'launch/zed_vslam_rtabmap.launch.py'
+            'launch/zed_vslam_rtabmap.launch.py',
+            'launch/new_rtab.launch.py'
         ]),
         ('share/' + package_name + '/config', ['config/zed_vslam_params.yaml']),
     ],
@@ -29,7 +30,7 @@ setup(
             'zed_3d_detector = mapping_module.scripts.3d_detector:main',
             'zed_2d_detector = mapping_module.scripts.2d_detector:main',
             'zed_vslam = mapping_module.scripts.zed_vslam:main',
-            'zed_vslam_node2 = mapping_module.scripts.zed_vslam_node2:main',
+            'zed_vslam2-node = mapping_module.scripts.zed_vslam2:main',
             'zed_3dpc = mapping_module.scripts.zed_3dpc:main',
         ],
     },

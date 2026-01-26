@@ -11,7 +11,7 @@ import argparse
 import rclpy
 from rclpy.utilities import remove_ros_args
 
-from mapping_module.nodes.zed_vslam_node2 import ZEDVSLAMNode
+from mapping_module.nodes.zed_vslam2_node import ZEDVSLAMNode
 
 
 def main(args=None):

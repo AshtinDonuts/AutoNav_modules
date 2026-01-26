@@ -95,7 +95,7 @@ def generate_launch_description():
     # ZED VSLAM Node2
     zed_vslam_node = Node(
         package='mapping_module',
-        executable='zed_vslam_node2',
+        executable='zed_vslam2-node',
         name='zed_vslam_node',
         output='screen',
         parameters=[{

@@ -96,7 +96,7 @@ To launch rtabmap_ros with your ZED camera node:
 ros2 launch rtabmap_launch rtabmap.launch.py
 
 # Terminal 2: Launch your ZED VSLAM node
-ros2 run mapping_module zed_vslam_node2
+ros2 run mapping_module zed_vslam2-node
 ```
 
 Or create a combined launch file that launches both nodes together.
