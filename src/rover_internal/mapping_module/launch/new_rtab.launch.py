@@ -52,8 +52,8 @@ def launch_setup(context: LaunchContext, *args, **kwargs):
                 '/zed_camera.launch.py']),
                 launch_arguments={'camera_model': LaunchConfiguration('camera_model'),
                                     'ros_params_override_path': zed_override_file.name,
-                                    'publish_tf': LaunchConfiguration('use_zed_odometry'),
-                                    'publish_map_tf': 'false'}.items(),
+                                    'publish_tf': 'true',   #
+                                    'publish_map_tf': 'true'}.items(),
         ),
 
         # Sync rgb/depth/camera_info together

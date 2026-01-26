@@ -1,74 +1,56 @@
-# Rover ROS2 Workspace
+# How to set up
 
-This is a ROS2 workspace for the rover project.
+First build rtabmap and rtabmap ros
 
-## Workspace Structure
+You can find detailed instructions below.
 
-```
-rover_ROS_ws/
-├── src/          # ROS2 packages go here
-├── build/        # Build files (created when building)
-├── install/      # Installation files (created when building)
-└── log/          # Build logs (created when building)
-```
+https://github.com/introlab/rtabmap_ros#installation
 
-## Setup
 
-### Using Conda (Recommended for Python packages)
+Tip: Packages will have standard error.  
+If you see 
+```Policy CMP0074 is not set: find_package uses <PackageName>_ROOT variables```,
+you can safely ignore this.  
 
-If you're using conda environments (e.g., for ZED SDK, PyTorch, etc.):
+You should also build the Zed ROS2 wrapper and Zed Ros2 examples packages.
 
-1. **Activate conda and source ROS2:**
-   ```bash
-   source setup_conda_ros.sh
-   ```
-   Or manually:
-   ```bash
-   # Activate conda environment
-   conda activate zed_pytorch  # or your conda env name
-   
-   # Source ROS2
-   source /opt/ros/<ros2-distro>/setup.bash
-   
-   # Source workspace
-   source install/setup.bash
-   ```
+https://github.com/stereolabs/zed-ros2-wrapper
 
-2. **Fix Python paths in entry point scripts (if needed):**
-   ```bash
-   ./fix_python_paths.sh
-   ```
 
-3. **Build the workspace (with conda activated):**
-   ```bash
-   cd /home/khw/Dev/rover_ROS_ws
-   colcon build
-   ```
+Finally, build the new mapping_module.
 
-### Standard Setup (without Conda)
+`cd rover_ROS_ws/`
+`colcon build --symlink`                        ## or
+`colcon build --symlink --packages-select mapping_module`  
+depending on what you're doing.
 
-1. Source your ROS2 installation:
-   ```bash
-   source /opt/ros/<ros2-distro>/setup.bash
-   ```
+Of course, remember to source before running:    
+`source rover_ROS_ws/install/setup.bash`  
+`source /opt/ros/humble/setup.bash`  
 
-2. Build the workspace:
-   ```bash
-   cd /home/khw/Dev/rover_ROS_ws
-   colcon build
-   ```
 
-3. Source the workspace:
-   ```bash
-   source install/setup.bash
-   ```
+## How to run
 
-## Adding Packages
+`ros2 launch mapping_module new_rtab.launch.py camera_model:=zed2i`
 
-Place your ROS2 packages in the `src/` directory. Each package should have its own directory with a `package.xml` and `CMakeLists.txt` (for C++ packages) or `setup.py` and `setup.cfg` (for Python packages).
 
-## Building
+## Output data types
+### Core RTAB-Map Outputs
 
-- Build all packages: `colcon build`
-- Build specific package: `colcon build --packages-select <package-name>`
-- Build with symlink install: `colcon build --symlink-install`
+- **Pose / Odometry**
+  - `/odom`
+  - `/map → odom` TF
+- **Point Clouds**
+  - Local and global
+- **OctoMap** (optional)
+- **2D Occupancy Grid**
+  - `/map` (`nav_msgs/OccupancyGrid`)
+
+_Data flow:_  
+Depth → 3D cloud → raycasting → 2D projection → occupancy map
+
+
+## Tips
+
+Do not connect the Zed2i camera if not in use.  
+If camera is not connecting, restart Ubuntu (or reset your USB bus / PCI connections, if you know what you're doing.)
