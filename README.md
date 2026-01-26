@@ -1,5 +1,8 @@
 # How to set up
 
+Before anything, `cd src`
+
+
 First build rtabmap and rtabmap ros
 
 You can find detailed instructions below.
