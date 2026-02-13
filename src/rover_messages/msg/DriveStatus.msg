@@ -1,4 +1,0 @@
-DriveVelocity velocity
-DriveSteer steer
-bool mode_changing
-int16 drive_mode

@@ -1,3 +1,0 @@
-float64 velocity
-float64 steer_angle
-float64 npt_ang_vel

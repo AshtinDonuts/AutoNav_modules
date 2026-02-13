@@ -6,26 +6,49 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 # Find dependencies
+find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(std_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 find_package(rover_messages REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
-# Add C++ executable
-add_executable(goal_pose_to_drive src/goal_pose_to_drive.cpp)
-
-ament_target_dependencies(goal_pose_to_drive
+# ============== Add Goal driver executable ============== 
+add_executable(goal_driver src/goal_driver.cpp)
+# Manually add rover_messages include directory
+target_include_directories(goal_driver PUBLIC
+  ${rover_messages_INCLUDE_DIRS}
+)
+ament_target_dependencies(goal_driver
   rclcpp
+  tf2_ros
+  tf2_geometry_msgs
   geometry_msgs
-  std_msgs
   rover_messages
 )
 
+# ==============  Add sim_bridge executable ============== 
+add_executable(sim_bridge src/sim_bridge.cpp)
 
-# Install the executable
-install(TARGETS goal_pose_to_drive
+target_include_directories(sim_bridge PUBLIC
+  ${rover_messages_INCLUDE_DIRS}
+)
+ament_target_dependencies(sim_bridge
+  rclcpp
+  geometry_msgs
+  rover_messages
+)
+
+# ============== Install both executables ============== 
+install(TARGETS goal_driver sim_bridge
   DESTINATION lib/${PROJECT_NAME}
 )
+# Install launch files, urdf, worlds, rviz
+install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY urdf DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY worlds DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY rviz DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
