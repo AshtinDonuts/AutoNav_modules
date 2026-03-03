@@ -48,6 +48,7 @@ setup(
             'costmap_visualizer = scripts.costmap_visualizer:main',
             'simulated_base = scripts.simulated_base:main',
             'synthetic_pointcloud_node = scripts.synthetic_pointcloud_node:main',
+            'pcd_to_height_costmap = scripts.pcd_to_height_costmap:main',
         ],
     },
 )
