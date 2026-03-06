@@ -28,7 +28,7 @@ class PcdToHeightCostmapNode(Node):
 
         # Input / output topics
         # IMPORTANT: Change it here if your ZED/PCD source topic is different.
-        self.declare_parameter('input_pointcloud_topic', '/zed/zed_node/point_cloud/cloud_registered')
+        self.declare_parameter('input_pointcloud_topic', '/zed/points')
         # Output topic: normalized height preview (debug visualization map)
         self.declare_parameter('height_map_topic', '/height_map')
         # Output topic: planner-facing traversability costmap (0..100 / -1 unknown)

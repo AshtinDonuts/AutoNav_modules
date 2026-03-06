@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(driver_pkg)
+project(simulation_launch)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -13,27 +13,35 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(rover_messages REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED) # This is found correctly
 
-# ============== Add Goal driver executable ============== 
-add_executable(goal_driver src/goal_driver.cpp)
-# Manually add rover_messages include directory
-target_include_directories(goal_driver PUBLIC
-  ${rover_messages_INCLUDE_DIRS}
-)
-ament_target_dependencies(goal_driver
+# ==============  Add sim_bridge executable ============== 
+add_executable(sim_bridge src/sim_bridge.cpp)
+
+ament_target_dependencies(sim_bridge
   rclcpp
-  tf2_ros
-  tf2_geometry_msgs
   geometry_msgs
   rover_messages
 )
 
 # ============== Install both executables ============== 
-install(TARGETS goal_driver
+
+# Install directories
+install(DIRECTORY gazebo launch urdf worlds rviz
+  DESTINATION share/${PROJECT_NAME}
+)
+
+# Install C++ scripts
+install(TARGETS
+  sim_bridge
   DESTINATION lib/${PROJECT_NAME}
 )
-# Install launch files, urdf, worlds, rviz
-install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+# Install Python scripts
+# Note: Ensure the directory structure matches (PROJECT_NAME subfolder vs src)
+install(PROGRAMS
+  ${PROJECT_NAME}/zed_mimic_converter.py
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

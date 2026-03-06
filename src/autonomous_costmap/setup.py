@@ -12,20 +12,14 @@ setup(
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', [
             'launch/zed_to_costmap.py',
-            'launch/zed_synthetic_to_costmap.py',
-            'launch/stereo_camera_to_costmap.py',
-            'launch/gazebo_launch.py',
         ]),
         ('share/' + package_name + '/config', [
             'config/nav2_params.yaml',
-            'config/stereo2costmap.yaml',
-            'config/synthetic_costmap.yaml',
-            'config/rviz_config.rviz',
         ]),
-        ('share/' + package_name + '/maps', [
-            'maps/empty_map.yaml',
-            'maps/empty_map.pgm',
-        ]),
+        #('share/' + package_name + '/maps', [
+        #    'maps/empty_map.yaml',
+        #    'maps/empty_map.pgm',
+        #]),
         ('share/' + package_name + '/urdf', [
             'urdf/rover.urdf',
         ]),
@@ -44,11 +38,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'waypoint_marker_node = scripts.waypoint_marker_node:main',
-            'costmap_visualizer = scripts.costmap_visualizer:main',
-            'simulated_base = scripts.simulated_base:main',
-            'synthetic_pointcloud_node = scripts.synthetic_pointcloud_node:main',
-            'pcd_to_height_costmap = scripts.pcd_to_height_costmap:main',
+            'zed_mimic_converter = autonomous_costmap.zed_mimic_converter:main',
+            'pcd_to_height_costmap = autonomous_costmap.pcd_to_height_costmap:main',
         ],
     },
 )
