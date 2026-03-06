@@ -87,7 +87,7 @@ Recommended start:
 - `free_slope_deg: 5`
 - `lethal_slope_deg: 25`
 
-## 7. Planning Integration Contract (For Seng)
+## 7. Planning Integration Contract
 Planner should subscribe to:
 - `/height_traversability_costmap`
 
@@ -100,7 +100,39 @@ Suggested interpretation:
 
 If `unknown_as_obstacle=True`, unknown is already treated as blocked (`100`).
 
-## 8. Minimal Runtime Commands
+## 8. A* Usage Guide (How to Consume This Costmap)
+Use `/height_traversability_costmap` as a weighted 2D grid for A*.
+
+### Step-by-step
+1. Convert start/goal world coordinates to grid indices using:
+  - `resolution`
+  - `origin.position.x`, `origin.position.y`
+2. During neighbor expansion, read `cell_cost` from `grid.data[idx]`.
+3. Apply obstacle rule:
+  - skip if `cell_cost >= 100`
+  - if `cell_cost == -1`, either skip or treat as `100` (policy dependent)
+4. Compute movement cost:
+  - straight move = `1.0`
+  - diagonal move = `1.414`
+5. Add traversability penalty to A* `g` cost.
+
+### Suggested cost function
+```text
+g_new = g_cur + move_cost + alpha * (cell_cost / 100.0)
+```
+- `alpha` controls risk aversion (start with `alpha=2.0`)
+- larger `alpha` means planner avoids steep/high-cost terrain more aggressively
+
+### Suggested planning thresholds
+- `0..30`: low risk (prefer)
+- `31..69`: medium risk
+- `70..99`: high risk (strong penalty)
+- `100`: blocked
+
+### Practical note
+Do not map RViz colors directly to planning semantics. Always use numeric grid values.
+
+## 9. Minimal Runtime Commands
 ### Run costmap node
 ```bash
 cd /home/unixuser/AutoNav_modules
@@ -116,7 +148,7 @@ ros2 run autonomous_costmap pcd_to_height_costmap --ros-args \
 - Add `Map` display for `/height_map`
 - Add `Map` display for `/height_traversability_costmap`
 
-## 9. Notes
+## 10. Notes
 - `/height_map` is debug visualization.
 - `/height_traversability_costmap` is the planning input.
 - Color in RViz is display-dependent; numeric value is ground truth.
