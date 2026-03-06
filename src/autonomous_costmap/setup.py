@@ -11,21 +11,21 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', [
-            'launch/zed_to_costmap.py',
+            'launch/costmap.launch.py',
         ]),
         ('share/' + package_name + '/config', [
-            'config/nav2_params.yaml',
+            'config/costmap_params.yaml',
         ]),
         #('share/' + package_name + '/maps', [
         #    'maps/empty_map.yaml',
         #    'maps/empty_map.pgm',
         #]),
-        ('share/' + package_name + '/urdf', [
-            'urdf/rover.urdf',
-        ]),
-        ('share/' + package_name + '/worlds', [
-            'worlds/simple_corridor.world',
-        ]),
+        #('share/' + package_name + '/urdf', [
+        #    'urdf/rover.urdf',
+        #]),
+        #('share/' + package_name + '/worlds', [
+        #    'worlds/simple_corridor.world',
+        #]),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -38,8 +38,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'zed_mimic_converter = autonomous_costmap.zed_mimic_converter:main',
             'pcd_to_height_costmap = autonomous_costmap.pcd_to_height_costmap:main',
+            'map_diagnostic = autonomous_costmap.map_diagnostic:main', 
         ],
     },
 )
