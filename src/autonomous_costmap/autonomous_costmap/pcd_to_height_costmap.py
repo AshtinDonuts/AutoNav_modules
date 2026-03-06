@@ -18,8 +18,11 @@ from typing import List
 import rclpy
 from nav_msgs.msg import OccupancyGrid
 from rclpy.node import Node
+from rclpy.time import Time
+from rclpy.duration import Duration
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py.point_cloud2 import read_points
+from tf2_ros import Buffer, TransformException, TransformListener
 
 
 class PcdToHeightCostmapNode(Node):
@@ -103,10 +106,43 @@ class PcdToHeightCostmapNode(Node):
         # Subscriber
         self.create_subscription(PointCloud2, self.input_topic, self.cloud_callback, 10)
 
+        # TF listener for transforming incoming points into self.frame_id.
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
         self.get_logger().info(
             f'pcd_to_height_costmap ready | input={self.input_topic} | '
             f'height={self.height_map_topic} | traversability={self.traversability_topic}'
         )
+
+    @staticmethod
+    def transform_point(x: float, y: float, z: float, transform) -> tuple[float, float, float]:
+        # Quaternion rotation + translation from source frame into target frame.
+        qx = transform.transform.rotation.x
+        qy = transform.transform.rotation.y
+        qz = transform.transform.rotation.z
+        qw = transform.transform.rotation.w
+
+        tx = transform.transform.translation.x
+        ty = transform.transform.translation.y
+        tz = transform.transform.translation.z
+
+        r00 = 1.0 - 2.0 * (qy * qy + qz * qz)
+        r01 = 2.0 * (qx * qy - qz * qw)
+        r02 = 2.0 * (qx * qz + qy * qw)
+
+        r10 = 2.0 * (qx * qy + qz * qw)
+        r11 = 1.0 - 2.0 * (qx * qx + qz * qz)
+        r12 = 2.0 * (qy * qz - qx * qw)
+
+        r20 = 2.0 * (qx * qz - qy * qw)
+        r21 = 2.0 * (qy * qz + qx * qw)
+        r22 = 1.0 - 2.0 * (qx * qx + qy * qy)
+
+        nx = r00 * x + r01 * y + r02 * z + tx
+        ny = r10 * x + r11 * y + r12 * z + ty
+        nz = r20 * x + r21 * y + r22 * z + tz
+        return nx, ny, nz
 
     # Main processing callback for each incoming PointCloud2 frame.
     # What it does:
@@ -122,15 +158,35 @@ class PcdToHeightCostmapNode(Node):
 
         max_range_sq = self.max_range * self.max_range
 
+        source_frame = msg.header.frame_id if msg.header.frame_id else self.frame_id
+        transform = None
+        if source_frame != self.frame_id:
+            try:
+                transform = self.tf_buffer.lookup_transform(
+                    self.frame_id,
+                    source_frame,
+                    Time(),
+                    timeout=Duration(seconds=0.1),
+                )
+            except TransformException as ex:
+                self.get_logger().warning(
+                    f'Could not transform {source_frame} -> {self.frame_id}: {ex}'
+                )
+                return
+
         # Read XYZ points from PointCloud2 and bin into grid cells.
         # z from PointCloud2 is treated as cell height information.
-        for x, y, z in read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True):
+        for sx, sy, sz in read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True):
             # Filter points by height and distance to reduce noise and focus on relevant terrain.
-            if z < self.min_z or z > self.max_z:
+            if sz < self.min_z or sz > self.max_z:
                 continue
             # Filter points that are too far away to be relevant for local navigation.
-            if (x * x + y * y) > max_range_sq:
+            if (sx * sx + sy * sy) > max_range_sq:
                 continue
+
+            x, y, z = sx, sy, sz
+            if transform is not None:
+                x, y, z = self.transform_point(x, y, z, transform)
 
             # Convert (x,y) to grid cell indices (matrix_x, matrix_y).
             # Points outside the grid are ignored.
