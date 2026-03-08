@@ -13,4 +13,3 @@
 [submodule "src/src/zed-ros2-interfaces"]
 	path = src/src/zed-ros2-interfaces
 	url = https://github.com/stereolabs/zed-ros2-interfaces.git
-	branch = master
