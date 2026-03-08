@@ -1,9 +1,3 @@
-[submodule "src/find_object_2d"]
-	path = src/find_object_2d
-	url = https://github.com/introlab/find-object.git
-[submodule "src/zed-ros2-examples"]
-	path = src/zed-ros2-examples
-	url = https://github.com/stereolabs/zed-ros2-examples.git
 [submodule "src/zed-ros2-wrapper"]
 	path = src/zed-ros2-wrapper
 	url = https://github.com/stereolabs/zed-ros2-wrapper.git
@@ -13,3 +7,6 @@
 [submodule "src/rtabmap"]
 	path = src/rtabmap
 	url = https://github.com/introlab/rtabmap.git
+[submodule "src/zed-ros2-interfaces"]
+	path = src/zed-ros2-interfaces
+	url = https://github.com/stereolabs/zed-ros2-interfaces.git
