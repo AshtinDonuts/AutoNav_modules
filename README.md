@@ -8,12 +8,12 @@
 ```bash
 sudo apt update 
 source /opt/ros/humble/setup.bash # Source ros
-rosdep update
 ```
 ## Cloning
 ```bash
 git clone https://github.com/AshtinDonuts/AutoNav_modules.git --recursive # Clone this repo and its submodules
 cd AutoNav_modules # Enter ws
+rosdep update
 rosdep install --from-paths src --ignore-src -r -y # install dependencies
 ```
 

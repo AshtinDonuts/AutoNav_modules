@@ -1,15 +1,16 @@
 [submodule "src/zed-ros2-wrapper"]
 	path = src/zed-ros2-wrapper
 	url = https://github.com/stereolabs/zed-ros2-wrapper.git
-[submodule "src/zed-ros2-interfaces"]
-	path = src/zed-ros2-interfaces
-	url = https://github.com/stereolabs/zed-ros2-interfaces.git
+	branch = humble-v5.0.0
 [submodule "src/rtabmap_ros"]
 	path = src/rtabmap_ros
 	url = https://github.com/introlab/rtabmap_ros.git
+	branch = humble-devel
 [submodule "src/rtabmap"]
 	path = src/rtabmap
 	url = https://github.com/introlab/rtabmap.git
-[submodule "src/src/zed-ros2-interfaces"]
-	path = src/src/zed-ros2-interfaces
-	url = https://github.com/stereolabs/zed-ros2-interfaces.git
+	branch = humble-devel
+[submodule "src/message_filters"]
+	path = src/message_filters
+	url = https://github.com/ros2/message_filters.git
+	branch = humble
