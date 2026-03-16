@@ -1,7 +1,8 @@
 # Requirements
 - Ubuntu 22.04 (Jammy)
 - Ros Humble
-- Zed SDK (Cuda 12.8)
+- Zed SDK 5.0.7
+- Cuda 12.6.8
 
 # Preperation
 ## Install dependecies
