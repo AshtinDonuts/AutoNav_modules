@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'mapping_module'
+package_name = 'autonomous_camera'
 
 setup(
     name=package_name,
@@ -11,8 +11,7 @@ setup(
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', [
-            'launch/zed_3dpc.launch.py',
-            'launch/new_rtab.launch.py'
+            'launch/camera.launch.py'
         ]),
         ('share/' + package_name + '/config', ['config/zed_vslam_params.yaml']),
     ],
@@ -25,7 +24,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'zed_3dpc = mapping_module.scripts.zed_3dpc:main',
+            # 'zed_3dpc = mapping_module.scripts.zed_3dpc:main',
         ],
     },
 )
